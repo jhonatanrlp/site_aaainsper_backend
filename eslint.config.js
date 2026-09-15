@@ -27,6 +27,8 @@ export default tseslint.config(
       // type checker even though Vitest handles binding correctly.
       '@typescript-eslint/unbound-method': 'off',
       '@typescript-eslint/no-unnecessary-type-assertion': 'off',
+      // expect.objectContaining(...) types as `any` under vitest's globals
+      '@typescript-eslint/no-unsafe-assignment': 'off',
     },
   },
   prettier,

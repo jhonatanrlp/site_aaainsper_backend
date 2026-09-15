@@ -1,4 +1,5 @@
 import type { FastifyReply, FastifyRequest } from 'fastify';
+import { db } from '../database/client.js';
 import { isDirectorOfModality } from '../modules/modalities/repository.js';
 import { findUserById } from '../modules/users/repository.js';
 import { UnauthorizedError, ForbiddenError } from '../shared/errors.js';
@@ -47,7 +48,7 @@ async function loadRole(userId: string): Promise<AuthenticatedUser['role']> {
   const cached = roleCache.get(userId);
   if (cached) return cached;
 
-  const user = await findUserById(userId);
+  const user = await findUserById(db, userId);
   if (!user || !user.active) {
     throw new UnauthorizedError('Account not provisioned or inactive');
   }
@@ -108,7 +109,7 @@ export function requireModalityAccess(getModalityId: (request: FastifyRequest) =
 
     if (request.user.role === 'dm') {
       const modalityId = getModalityId(request);
-      const isDirector = await isDirectorOfModality(request.user.id, modalityId);
+      const isDirector = await isDirectorOfModality(db, request.user.id, modalityId);
       if (isDirector) return;
     }
 

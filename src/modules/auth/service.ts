@@ -1,4 +1,5 @@
 import { env } from '../../config/env.js';
+import { db } from '../../database/client.js';
 import { ForbiddenError } from '../../shared/errors.js';
 import { upsertUserFromAuth, type UserRow } from '../users/repository.js';
 import type { SupabaseIdentity } from '../../middleware/auth.js';
@@ -13,7 +14,7 @@ export async function bootstrapSession(identity: SupabaseIdentity): Promise<User
     throw new ForbiddenError(`Only @${env.ALLOWED_EMAIL_DOMAIN} accounts are allowed`);
   }
 
-  return upsertUserFromAuth({ id: identity.id, email: identity.email });
+  return upsertUserFromAuth(db, { id: identity.id, email: identity.email });
 }
 
 export function isProfileComplete(user: UserRow): boolean {

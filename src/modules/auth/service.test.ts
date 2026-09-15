@@ -37,7 +37,7 @@ describe('bootstrapSession', () => {
 
     const result = await bootstrapSession({ id: 'u1', email: 'student@al.insper.edu.br' });
     expect(result.role).toBe('atleta');
-    expect(upsertUserFromAuth).toHaveBeenCalledWith({
+    expect(upsertUserFromAuth).toHaveBeenCalledWith(expect.anything(), {
       id: 'u1',
       email: 'student@al.insper.edu.br',
     });

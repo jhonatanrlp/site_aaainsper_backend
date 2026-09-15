@@ -7,7 +7,16 @@ import swaggerUi from '@fastify/swagger-ui';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { env } from './config/env.js';
 import { registerErrorHandler } from './middleware/error-handler.js';
+import { athletesRoutes } from './modules/athletes/routes.js';
+import { auditRoutes } from './modules/audit/routes.js';
 import { authRoutes } from './modules/auth/routes.js';
+import { competitionsRoutes } from './modules/competitions/routes.js';
+import { documentsRoutes } from './modules/documents/routes.js';
+import { duesRoutes } from './modules/dues/routes.js';
+import { econoRoutes } from './modules/econo/routes.js';
+import { modalitiesRoutes } from './modules/modalities/routes.js';
+import { storeRoutes } from './modules/store/routes.js';
+import { usersRoutes } from './modules/users/routes.js';
 
 export async function buildApp(): Promise<FastifyInstance> {
   const app = Fastify({
@@ -46,6 +55,15 @@ export async function buildApp(): Promise<FastifyInstance> {
   app.get('/health', () => ({ status: 'ok' }));
 
   await app.register(authRoutes);
+  await app.register(usersRoutes);
+  await app.register(modalitiesRoutes);
+  await app.register(athletesRoutes);
+  await app.register(documentsRoutes);
+  await app.register(competitionsRoutes);
+  await app.register(storeRoutes);
+  await app.register(duesRoutes);
+  await app.register(econoRoutes);
+  await app.register(auditRoutes);
 
   return app;
 }

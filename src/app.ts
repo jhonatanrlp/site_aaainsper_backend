@@ -5,6 +5,12 @@ import rateLimit from '@fastify/rate-limit';
 import swagger from '@fastify/swagger';
 import swaggerUi from '@fastify/swagger-ui';
 import Fastify, { type FastifyInstance } from 'fastify';
+import {
+  jsonSchemaTransform,
+  serializerCompiler,
+  validatorCompiler,
+  type ZodTypeProvider,
+} from 'fastify-type-provider-zod';
 import { env } from './config/env.js';
 import { registerErrorHandler } from './middleware/error-handler.js';
 import { athletesRoutes } from './modules/athletes/routes.js';
@@ -26,6 +32,9 @@ export async function buildApp(): Promise<FastifyInstance> {
         : { level: env.NODE_ENV === 'test' ? 'silent' : 'info' },
     trustProxy: true,
   });
+
+  app.setValidatorCompiler(validatorCompiler);
+  app.setSerializerCompiler(serializerCompiler);
 
   registerErrorHandler(app);
 
@@ -49,21 +58,24 @@ export async function buildApp(): Promise<FastifyInstance> {
         version: '1.0.0',
       },
     },
+    transform: jsonSchemaTransform,
   });
   await app.register(swaggerUi, { routePrefix: '/docs' });
 
-  app.get('/health', () => ({ status: 'ok' }));
+  const typedApp = app.withTypeProvider<ZodTypeProvider>();
 
-  await app.register(authRoutes);
-  await app.register(usersRoutes);
-  await app.register(modalitiesRoutes);
-  await app.register(athletesRoutes);
-  await app.register(documentsRoutes);
-  await app.register(competitionsRoutes);
-  await app.register(storeRoutes);
-  await app.register(duesRoutes);
-  await app.register(econoRoutes);
-  await app.register(auditRoutes);
+  typedApp.get('/health', () => ({ status: 'ok' }));
+
+  await typedApp.register(authRoutes);
+  await typedApp.register(usersRoutes);
+  await typedApp.register(modalitiesRoutes);
+  await typedApp.register(athletesRoutes);
+  await typedApp.register(documentsRoutes);
+  await typedApp.register(competitionsRoutes);
+  await typedApp.register(storeRoutes);
+  await typedApp.register(duesRoutes);
+  await typedApp.register(econoRoutes);
+  await typedApp.register(auditRoutes);
 
   return app;
 }

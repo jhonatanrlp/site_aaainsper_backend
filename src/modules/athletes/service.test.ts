@@ -6,6 +6,9 @@ vi.mock('../../database/client.js', () => ({
 }));
 vi.mock('../audit/repository.js', () => ({ recordAudit: vi.fn() }));
 vi.mock('../modalities/repository.js', () => ({ findTeamById: vi.fn() }));
+vi.mock('../competitions/repository.js', () => ({ listRegistrationsForAthlete: vi.fn() }));
+vi.mock('../documents/repository.js', () => ({ listAthleteDocuments: vi.fn() }));
+vi.mock('../users/repository.js', () => ({ findUserById: vi.fn() }));
 vi.mock('./repository.js', () => ({
   findAthleteById: vi.fn(),
   findAthleteByUserId: vi.fn(),
@@ -19,10 +22,15 @@ vi.mock('./repository.js', () => ({
   listAthleteTeamIds: vi.fn(),
   listAthletesForModality: vi.fn(),
   listAllAthletes: vi.fn(),
+  listAthleteMemberships: vi.fn(),
+  listAthleteJoinRequests: vi.fn(),
 }));
 
 const { recordAudit } = await import('../audit/repository.js');
 const { findTeamById } = await import('../modalities/repository.js');
+const { listRegistrationsForAthlete } = await import('../competitions/repository.js');
+const { listAthleteDocuments } = await import('../documents/repository.js');
+const { findUserById } = await import('../users/repository.js');
 const {
   findAthleteById,
   isAthleteVisibleToDirector,
@@ -30,9 +38,16 @@ const {
   decideJoinRequest,
   confirmMembership,
   seedRequiredDocuments,
+  listAthleteMemberships,
+  listAthleteJoinRequests,
 } = await import('./repository.js');
-const { assertCanViewAthlete, approveJoinRequest, rejectJoinRequest, listAthletes } =
-  await import('./service.js');
+const {
+  assertCanViewAthlete,
+  approveJoinRequest,
+  rejectJoinRequest,
+  listAthletes,
+  getAthleteDetail,
+} = await import('./service.js');
 
 describe('assertCanViewAthlete', () => {
   beforeEach(() => vi.clearAllMocks());
@@ -215,5 +230,57 @@ describe('rejectJoinRequest', () => {
         reason: 'x',
       }),
     ).rejects.toThrow(ConflictError);
+  });
+});
+
+describe('getAthleteDetail', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it("rejects a dm outside the athlete's modalities — enforces the same visibility rule as assertCanViewAthlete", async () => {
+    vi.mocked(findAthleteById).mockResolvedValue({ id: 'a1', userId: 'someone-else' } as never);
+    vi.mocked(isAthleteVisibleToDirector).mockResolvedValue(false);
+
+    await expect(getAthleteDetail({ id: 'dm-1', role: 'dm' }, 'a1')).rejects.toThrow(
+      ForbiddenError,
+    );
+  });
+
+  it('returns full detail (profile, memberships, pending requests, documents, registrations) for an authorized dm', async () => {
+    vi.mocked(findAthleteById).mockResolvedValue({ id: 'a1', userId: 'u1' } as never);
+    vi.mocked(isAthleteVisibleToDirector).mockResolvedValue(true);
+    vi.mocked(findUserById).mockResolvedValue({
+      id: 'u1',
+      email: 'a@al.insper.edu.br',
+      fullName: 'Jane Doe',
+      cpf: '12345678900',
+      rg: 'MG-1',
+      birthDate: '2000-01-01',
+      course: 'Engineering',
+      instagram: 'jane',
+      phone: '11999999999',
+    } as never);
+    vi.mocked(listAthleteMemberships).mockResolvedValue([
+      { teamId: 't1', teamName: 'Team A', modalityId: 'm1', modalityName: 'Futsal' },
+    ] as never);
+    vi.mocked(listAthleteJoinRequests).mockResolvedValue([]);
+    vi.mocked(listAthleteDocuments).mockResolvedValue([]);
+    vi.mocked(listRegistrationsForAthlete).mockResolvedValue([]);
+
+    const detail = await getAthleteDetail({ id: 'dm-1', role: 'dm' }, 'a1');
+
+    expect(detail.fullName).toBe('Jane Doe');
+    // Raw CPF is never exposed — even in the "full" detail view.
+    expect(detail).not.toHaveProperty('cpf');
+    expect(detail.cpfMask).toBe('***.***.***-00');
+    expect(detail.memberships).toHaveLength(1);
+  });
+
+  it("throws NotFoundError if the athlete's user record is somehow missing", async () => {
+    vi.mocked(findAthleteById).mockResolvedValue({ id: 'a1', userId: 'u1' } as never);
+    vi.mocked(findUserById).mockResolvedValue(undefined);
+
+    await expect(getAthleteDetail({ id: 'gestor-1', role: 'gestao' }, 'a1')).rejects.toThrow(
+      NotFoundError,
+    );
   });
 });

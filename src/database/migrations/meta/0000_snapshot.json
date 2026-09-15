@@ -1,5 +1,5 @@
 {
-  "id": "3d1469fc-488f-440e-abe4-283b467be24b",
+  "id": "d81e1da7-87f6-4ba9-9af6-d69846f6a3a9",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "version": "7",
   "dialect": "postgresql",
@@ -1636,12 +1636,12 @@
           "primaryKey": false,
           "notNull": false
         },
-        "is_winner": {
-          "name": "is_winner",
-          "type": "boolean",
+        "outcome": {
+          "name": "outcome",
+          "type": "match_outcome",
+          "typeSchema": "public",
           "primaryKey": false,
-          "notNull": true,
-          "default": false
+          "notNull": true
         },
         "tiebreak_value": {
           "name": "tiebreak_value",
@@ -2243,6 +2243,11 @@
       "name": "dues_payment_status",
       "schema": "public",
       "values": ["paid", "pending"]
+    },
+    "public.match_outcome": {
+      "name": "match_outcome",
+      "schema": "public",
+      "values": ["win", "draw", "loss"]
     },
     "public.match_slot": {
       "name": "match_slot",

@@ -1,6 +1,7 @@
 import { db } from '../../database/client.js';
 import { recordAudit } from '../audit/repository.js';
-import { ForbiddenError, NotFoundError } from '../../shared/errors.js';
+import { ConflictError, ForbiddenError, NotFoundError } from '../../shared/errors.js';
+import { computeRoundRobinStandings, computeSingleEliminationStandings } from './placement.js';
 import {
   createScenario as createScenarioRepo,
   createTournament as createTournamentRepo,
@@ -13,14 +14,17 @@ import {
   listMatches,
   listModalities,
   listParticipants,
+  listResultsForModality,
   listScenarios as listScenariosRepo,
   listStandings,
   markMatchCompleted,
-  bumpStandingTally,
-  setStandingPosition,
+  replaceStandings,
+  setManualStandings,
   updateTournament as updateTournamentRepo,
   upsertMatchResult,
+  type MatchOutcome,
   type MatchRow,
+  type StandingComputation,
   type StandingRow,
   type TournamentModalityRow,
   type TournamentParticipantRow,
@@ -36,6 +40,12 @@ export interface Actor {
 function assertStaff(actor: Actor): void {
   if (actor.role === 'atleta') throw new ForbiddenError();
 }
+
+const AUTO_COMPUTED_FORMATS = new Set<TournamentModalityRow['format']>([
+  'single_elimination',
+  'round_robin',
+  'grouped_round_robin',
+]);
 
 export interface TournamentView {
   tournament: TournamentRow;
@@ -84,14 +94,52 @@ export async function getModalityMatches(tournamentModalityId: string): Promise<
 export interface MatchResultInput {
   participantId: string;
   score: number | null;
-  isWinner: boolean;
+  outcome: MatchOutcome;
   tiebreakValue?: number | null;
 }
 
-// Records one row per participant per match (never a JSON blob — see the
-// approved architecture note on ECONO). Also bumps each participant's
-// running win/draw/loss tally in `standings`. Final bracket `position` is
-// deliberately NOT auto-computed here — see setStandings below.
+function computeStandingsForFormat(
+  format: TournamentModalityRow['format'],
+  results: Parameters<typeof computeRoundRobinStandings>[0],
+): StandingComputation[] {
+  if (format === 'single_elimination') return computeSingleEliminationStandings(results);
+  return computeRoundRobinStandings(results); // round_robin and grouped_round_robin
+}
+
+// Validates that `results` covers exactly this match's two participants with
+// one of the only two valid outcome combinations — {win, loss} or
+// {draw, draw}. Anything else (both win, both loss, a lone draw, a missing
+// participant) is an explicit error, never silently reinterpreted.
+function assertValidResultSet(participantIds: string[], results: MatchResultInput[]): void {
+  if (results.length !== participantIds.length) {
+    throw new ConflictError(
+      'Results must be submitted for every participant in the match, exactly once',
+    );
+  }
+  const resultParticipantIds = new Set(results.map((r) => r.participantId));
+  if (resultParticipantIds.size !== results.length) {
+    throw new ConflictError('Duplicate participant in results');
+  }
+  for (const id of participantIds) {
+    if (!resultParticipantIds.has(id)) {
+      throw new ForbiddenError("Results do not match this match's participants");
+    }
+  }
+
+  const outcomes = results.map((r) => r.outcome).sort();
+  const isWinLoss = outcomes.length === 2 && outcomes[0] === 'loss' && outcomes[1] === 'win';
+  const isDrawDraw = outcomes.every((o) => o === 'draw');
+  if (!isWinLoss && !isDrawDraw) {
+    throw new ConflictError(
+      'Invalid result combination — exactly one winner and one loser, or a draw for both sides',
+    );
+  }
+}
+
+// Records one row per participant per match (never a JSON blob), then fully
+// recomputes standings for the whole tournament modality from every
+// recorded result — position is always derived, never a second independent
+// system alongside a live tally.
 export async function recordMatchResults(params: {
   actor: Actor;
   matchId: string;
@@ -102,14 +150,19 @@ export async function recordMatchResults(params: {
   const match = await findMatchById(db, params.matchId);
   if (!match) throw new NotFoundError('Match');
 
-  const validParticipantIds = new Set(await listMatchParticipantIds(db, params.matchId));
-  for (const result of params.results) {
-    if (!validParticipantIds.has(result.participantId)) {
-      throw new ForbiddenError('Participant is not part of this match');
-    }
+  const modality = await findModalityById(db, match.tournamentModalityId);
+  if (!modality) throw new NotFoundError('Tournament modality');
+  if (!AUTO_COMPUTED_FORMATS.has(modality.format)) {
+    throw new ConflictError('This format does not use matches — set standings directly instead');
   }
 
-  const isDraw = params.results.length > 1 && params.results.every((r) => !r.isWinner);
+  const participantIds = await listMatchParticipantIds(db, params.matchId);
+  assertValidResultSet(participantIds, params.results);
+
+  const isDraw = params.results.every((r) => r.outcome === 'draw');
+  if (isDraw && modality.format === 'single_elimination') {
+    throw new ConflictError('single_elimination matches require a decisive winner, not a draw');
+  }
 
   await db.transaction(async (tx) => {
     for (const result of params.results) {
@@ -117,20 +170,17 @@ export async function recordMatchResults(params: {
         matchId: params.matchId,
         participantId: result.participantId,
         score: result.score,
-        isWinner: result.isWinner,
+        outcome: result.outcome,
         tiebreakValue: result.tiebreakValue ?? null,
         recordedBy: params.actor.id,
-      });
-
-      const outcome = isDraw ? 'draw' : result.isWinner ? 'win' : 'loss';
-      await bumpStandingTally(tx, {
-        tournamentModalityId: match.tournamentModalityId,
-        participantId: result.participantId,
-        outcome,
       });
     }
 
     await markMatchCompleted(tx, params.matchId);
+
+    const allResults = await listResultsForModality(tx, match.tournamentModalityId);
+    const computed = computeStandingsForFormat(modality.format, allResults);
+    await replaceStandings(tx, match.tournamentModalityId, computed);
 
     await recordAudit(tx, {
       actorId: params.actor.id,
@@ -145,12 +195,13 @@ export async function recordMatchResults(params: {
 export interface StandingEntryInput {
   participantId: string;
   position: number | null;
-  points?: number;
 }
 
-// dm/gestão only. Used both for formats without real matches (fixed and
-// reorderable ranking) and to finalize bracket placement once a
-// single/round-robin modality concludes.
+// dm/gestão only — restricted to fixed_ranking/reorderable_ranking, the two
+// formats with no real matches. For the three auto-computed formats,
+// standings can only change by recording match results (recordMatchResults
+// above); this route rejects those to avoid two independent placement
+// systems for the same modality.
 export async function setStandings(params: {
   actor: Actor;
   tournamentModalityId: string;
@@ -160,16 +211,14 @@ export async function setStandings(params: {
 
   const modality = await findModalityById(db, params.tournamentModalityId);
   if (!modality) throw new NotFoundError('Tournament modality');
+  if (AUTO_COMPUTED_FORMATS.has(modality.format)) {
+    throw new ConflictError(
+      'Standings for this format are computed automatically from match results',
+    );
+  }
 
   await db.transaction(async (tx) => {
-    for (const entry of params.entries) {
-      await setStandingPosition(tx, {
-        tournamentModalityId: params.tournamentModalityId,
-        participantId: entry.participantId,
-        position: entry.position,
-        points: entry.points,
-      });
-    }
+    await setManualStandings(tx, params.tournamentModalityId, params.entries);
 
     await recordAudit(tx, {
       actorId: params.actor.id,

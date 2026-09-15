@@ -3,11 +3,13 @@
 Backend API for the Atlética Insper club-management system. Ground-up rewrite — see
 [the architecture note](#architecture) below for how this replaces the legacy setup.
 
-> **Status:** in progress (Checkpoint B — core domain modules landed: users, modalities/teams,
-> athletes, documents, competitions, store, dues, econo, audit — 44 endpoints, all with
-> server-side authorization and negative-path tests). This README will be expanded as each
-> phase lands; the full reference (data model, every endpoint, auth/authorization explanation,
-> deployment) is written at the end of the rewrite.
+> **Status:** in progress (Checkpoint B — core domain modules landed and revised: users,
+> modalities/teams, athletes, documents, competitions, store, dues, econo, audit — 44 endpoints,
+> all with server-side authorization and negative-path tests. ECONO standings are fully derived
+> per format (see below); `GET /athletes/:id` returns real detail; `PATCH /users/me` is a true
+> partial update). This README will be expanded as each phase lands; the full reference (data
+> model, every endpoint, auth/authorization explanation, deployment) is written at the end of
+> the rewrite.
 
 ## Architecture
 
@@ -109,7 +111,16 @@ src/
 
 ## Testing
 
-`npm test` runs Vitest. Unit tests mock external dependencies (Supabase, the database) so they
-run without any real infrastructure. Every role-gated module includes negative-path security
-tests (e.g. an athlete accessing another athlete's data, a DM crossing into a modality they
-don't direct, a user attempting to self-escalate their role) — these are required, not optional.
+Two separate suites:
+
+- `npm test` — Vitest unit tests. Every external dependency (Supabase, the database) is mocked,
+  so these run without any real infrastructure. Every role-gated module includes negative-path
+  security tests (e.g. an athlete accessing another athlete's data, a DM crossing into a modality
+  they don't direct, a user attempting to self-escalate their role) — these are required, not
+  optional.
+- `npm run test:integration` — Vitest against a **real** Postgres (set `DATABASE_URL` to one with
+  the migrations applied). Mocks can't prove a `CHECK` constraint actually rejects bad data, that
+  a partial unique index actually blocks a duplicate pending request, or that `SELECT ... FOR
+UPDATE` actually serializes two concurrent stock reservations — these tests exercise the real
+  transactions and real constraints instead. CI runs this against its Postgres service container
+  after applying migrations; see `.github/workflows/ci.yml`.

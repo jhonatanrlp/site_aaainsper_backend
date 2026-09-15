@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { ForbiddenError, NotFoundError } from '../../shared/errors.js';
+import { ConflictError, ForbiddenError, NotFoundError } from '../../shared/errors.js';
 
 vi.mock('../../database/client.js', () => ({
   db: { transaction: vi.fn((cb: (tx: unknown) => unknown) => cb('tx')) },
@@ -13,8 +13,9 @@ vi.mock('./repository.js', () => ({
 }));
 
 const { recordAudit } = await import('../audit/repository.js');
-const { findUserById, updateUserRole } = await import('./repository.js');
-const { changeUserRole, revealCpf, toProfileResponse } = await import('./service.js');
+const { findUserById, updateUserRole, updateOwnProfile } = await import('./repository.js');
+const { changeUserRole, completeOwnProfile, revealCpf, toProfileResponse } =
+  await import('./service.js');
 
 describe('toProfileResponse', () => {
   it('never includes the raw cpf — only a masked version', () => {
@@ -72,6 +73,46 @@ describe('changeUserRole', () => {
     expect(recordAudit).toHaveBeenCalledWith(
       'tx',
       expect.objectContaining({ actorId: 'u1', action: 'ROLE_CHANGED', entityId: 'u2' }),
+    );
+  });
+});
+
+describe('completeOwnProfile', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it('passes through only the fields provided — a true partial update, not a full replace', async () => {
+    vi.mocked(updateOwnProfile).mockResolvedValue({
+      id: 'u1',
+      email: 'a@al.insper.edu.br',
+      fullName: 'Jane Doe',
+      cpf: null,
+      rg: null,
+      birthDate: null,
+      course: null,
+      instagram: null,
+      phone: null,
+      role: 'atleta',
+      active: true,
+    } as never);
+
+    await completeOwnProfile('u1', { fullName: 'Jane Doe' });
+
+    expect(updateOwnProfile).toHaveBeenCalledWith(expect.anything(), 'u1', {
+      fullName: 'Jane Doe',
+    });
+  });
+
+  it('translates a duplicate-CPF unique violation into ConflictError', async () => {
+    vi.mocked(updateOwnProfile).mockRejectedValue({ code: '23505' });
+
+    await expect(completeOwnProfile('u1', { cpf: '12345678900' })).rejects.toThrow(ConflictError);
+  });
+
+  it('lets other errors propagate unchanged', async () => {
+    vi.mocked(updateOwnProfile).mockRejectedValue(new Error('connection lost'));
+
+    await expect(completeOwnProfile('u1', { cpf: '12345678900' })).rejects.toThrow(
+      'connection lost',
     );
   });
 });

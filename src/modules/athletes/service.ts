@@ -1,6 +1,11 @@
 import { db } from '../../database/client.js';
 import { recordAudit } from '../audit/repository.js';
 import { findTeamById } from '../modalities/repository.js';
+import { listRegistrationsForAthlete, type RegistrationRow } from '../competitions/repository.js';
+import { listAthleteDocuments, type AthleteDocumentWithType } from '../documents/repository.js';
+import { findUserById } from '../users/repository.js';
+import { maskCpf } from '../../shared/cpf.js';
+import { isUniqueViolation } from '../../shared/db-errors.js';
 import { ConflictError, ForbiddenError, NotFoundError } from '../../shared/errors.js';
 import {
   confirmMembership,
@@ -12,9 +17,13 @@ import {
   findOrCreateAthlete,
   isAthleteVisibleToDirector,
   listAllAthletes,
+  listAthleteJoinRequests,
+  listAthleteMemberships,
   listAthleteTeamIds,
   listAthletesForModality,
   seedRequiredDocuments,
+  type AthleteMembership,
+  type AthletePendingRequest,
   type AthleteSummary,
   type TeamJoinRequestRow,
 } from './repository.js';
@@ -158,8 +167,54 @@ export async function getMyAthleteSummary(userId: string) {
   return { athlete, teamIds };
 }
 
-function isUniqueViolation(error: unknown): boolean {
-  return (
-    typeof error === 'object' && error !== null && (error as { code?: string }).code === '23505'
-  );
+export interface AthleteDetail {
+  athleteId: string;
+  userId: string;
+  fullName: string | null;
+  email: string;
+  cpfMask: string | null;
+  rg: string | null;
+  birthDate: string | null;
+  course: string | null;
+  instagram: string | null;
+  phone: string | null;
+  memberships: AthleteMembership[];
+  pendingRequests: AthletePendingRequest[];
+  documents: AthleteDocumentWithType[];
+  competitionRegistrations: RegistrationRow[];
+}
+
+// Full detail for DM/gestão review (and the athlete's own view of
+// themselves) — authorization is the same rule as assertCanViewAthlete.
+export async function getAthleteDetail(actor: Actor, athleteId: string): Promise<AthleteDetail> {
+  await assertCanViewAthlete(actor, athleteId);
+
+  const athlete = await findAthleteById(db, athleteId);
+  if (!athlete) throw new NotFoundError('Athlete');
+  const user = await findUserById(db, athlete.userId);
+  if (!user) throw new NotFoundError('User');
+
+  const [memberships, pendingRequests, documents, competitionRegistrations] = await Promise.all([
+    listAthleteMemberships(db, athleteId),
+    listAthleteJoinRequests(db, athleteId),
+    listAthleteDocuments(db, athleteId),
+    listRegistrationsForAthlete(db, athleteId),
+  ]);
+
+  return {
+    athleteId: athlete.id,
+    userId: user.id,
+    fullName: user.fullName,
+    email: user.email,
+    cpfMask: maskCpf(user.cpf),
+    rg: user.rg,
+    birthDate: user.birthDate,
+    course: user.course,
+    instagram: user.instagram,
+    phone: user.phone,
+    memberships,
+    pendingRequests,
+    documents,
+    competitionRegistrations,
+  };
 }

@@ -2,8 +2,8 @@ import type { FastifyReply, FastifyRequest } from 'fastify';
 import { UnauthorizedError } from '../../shared/errors.js';
 import {
   approveJoinRequest,
-  assertCanViewAthlete,
   createJoinRequest,
+  getAthleteDetail,
   getMyAthleteSummary,
   listAthletes,
   rejectJoinRequest,
@@ -33,8 +33,7 @@ export async function listAthletesController(request: FastifyRequest, reply: Fas
 export async function getAthleteController(request: FastifyRequest, reply: FastifyReply) {
   const user = requireUser(request);
   const { id } = request.params as { id: string };
-  await assertCanViewAthlete(user, id);
-  reply.send({ athleteId: id });
+  reply.send(await getAthleteDetail(user, id));
 }
 
 export async function createJoinRequestController(request: FastifyRequest, reply: FastifyReply) {

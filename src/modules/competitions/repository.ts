@@ -89,6 +89,17 @@ export async function listCompetitionRegistrations(
     .orderBy(desc(competitionRegistrations.createdAt));
 }
 
+export async function listRegistrationsForAthlete(
+  db: DbClient,
+  athleteId: string,
+): Promise<RegistrationRow[]> {
+  return db
+    .select()
+    .from(competitionRegistrations)
+    .where(eq(competitionRegistrations.athleteId, athleteId))
+    .orderBy(desc(competitionRegistrations.createdAt));
+}
+
 export async function findRegistrationById(
   db: DbClient,
   id: string,

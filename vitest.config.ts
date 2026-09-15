@@ -6,6 +6,9 @@ export default defineConfig({
     globals: false,
     setupFiles: ['./src/test/setup.ts'],
     include: ['src/**/*.test.ts'],
+    // Integration tests need a real Postgres and their own runner
+    // (vitest.integration.config.ts / npm run test:integration).
+    exclude: ['**/node_modules/**', 'src/test/integration/**'],
     coverage: {
       provider: 'v8',
       reporter: ['text', 'html'],

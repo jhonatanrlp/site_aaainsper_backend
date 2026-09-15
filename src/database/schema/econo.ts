@@ -8,7 +8,12 @@ import {
   uniqueIndex,
   uuid,
 } from 'drizzle-orm/pg-core';
-import { matchSlotEnum, matchStatusEnum, tournamentModalityFormatEnum } from './enums.js';
+import {
+  matchOutcomeEnum,
+  matchSlotEnum,
+  matchStatusEnum,
+  tournamentModalityFormatEnum,
+} from './enums.js';
 import { timestamps } from './shared.js';
 import { users } from './users.js';
 
@@ -71,7 +76,9 @@ export const matchParticipants = pgTable(
 );
 
 // One row per participant per match — auditable and editable (via audit_logs),
-// not buried inside a JSON blob.
+// not buried inside a JSON blob. `outcome` is always supplied explicitly by
+// the caller (win/draw/loss) — never inferred, so invalid/incomplete input
+// is rejected rather than silently treated as a draw.
 export const matchResults = pgTable(
   'match_results',
   {
@@ -83,7 +90,7 @@ export const matchResults = pgTable(
       .notNull()
       .references(() => tournamentParticipants.id, { onDelete: 'cascade' }),
     score: integer('score'),
-    isWinner: boolean('is_winner').notNull().default(false),
+    outcome: matchOutcomeEnum('outcome').notNull(),
     // e.g. Rugby's try-count tiebreaker
     tiebreakValue: integer('tiebreak_value'),
     recordedBy: uuid('recorded_by')
@@ -96,8 +103,11 @@ export const matchResults = pgTable(
   ],
 );
 
-// Recomputed by the service layer after each match_results write, or set
-// directly for formats without real matches (fixed/reorderable ranking).
+// For single_elimination/round_robin/grouped_round_robin, fully recomputed
+// by the service layer from match_results after every result write —
+// position is always derived, never hand-edited, for these three formats.
+// For fixed_ranking/reorderable_ranking (no real matches), position is set
+// directly via PATCH /standings — the only formats where that's allowed.
 export const standings = pgTable(
   'standings',
   {

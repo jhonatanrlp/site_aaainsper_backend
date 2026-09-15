@@ -1,4 +1,4 @@
-import { eq, sql } from 'drizzle-orm';
+import { and, eq, inArray } from 'drizzle-orm';
 import type { DbClient } from '../../database/client.js';
 import {
   matchParticipants,
@@ -116,13 +116,15 @@ export async function listMatchParticipantIds(db: DbClient, matchId: string): Pr
   return rows.map((row) => row.participantId);
 }
 
+export type MatchOutcome = 'win' | 'draw' | 'loss';
+
 export async function upsertMatchResult(
   db: DbClient,
   values: {
     matchId: string;
     participantId: string;
     score: number | null;
-    isWinner: boolean;
+    outcome: MatchOutcome;
     tiebreakValue: number | null;
     recordedBy: string;
   },
@@ -134,7 +136,7 @@ export async function upsertMatchResult(
       target: [matchResults.matchId, matchResults.participantId],
       set: {
         score: values.score,
-        isWinner: values.isWinner,
+        outcome: values.outcome,
         tiebreakValue: values.tiebreakValue,
         recordedBy: values.recordedBy,
         recordedAt: new Date(),
@@ -149,66 +151,90 @@ export async function markMatchCompleted(db: DbClient, matchId: string): Promise
     .where(eq(matches.id, matchId));
 }
 
-// Running tally, incremented once per recorded result — win/draw/loss counts
-// and points (win=3, draw=1, loss=0). Final bracket `position` is left null
-// here and set explicitly via setStandingPosition once a tournament
-// modality concludes (see module README note in the service layer).
-export async function bumpStandingTally(
-  db: DbClient,
-  params: { tournamentModalityId: string; participantId: string; outcome: 'win' | 'draw' | 'loss' },
-): Promise<void> {
-  const pointsDelta = params.outcome === 'win' ? 3 : params.outcome === 'draw' ? 1 : 0;
-  const winsDelta = params.outcome === 'win' ? 1 : 0;
-  const drawsDelta = params.outcome === 'draw' ? 1 : 0;
-  const lossesDelta = params.outcome === 'loss' ? 1 : 0;
-
-  await db
-    .insert(standings)
-    .values({
-      tournamentModalityId: params.tournamentModalityId,
-      participantId: params.participantId,
-      points: pointsDelta,
-      wins: winsDelta,
-      draws: drawsDelta,
-      losses: lossesDelta,
-    })
-    .onConflictDoUpdate({
-      target: [standings.tournamentModalityId, standings.participantId],
-      set: {
-        points: sql`${standings.points} + ${pointsDelta}`,
-        wins: sql`${standings.wins} + ${winsDelta}`,
-        draws: sql`${standings.draws} + ${drawsDelta}`,
-        losses: sql`${standings.losses} + ${lossesDelta}`,
-        updatedAt: new Date(),
-      },
-    });
+export interface RecordedMatchResult {
+  matchId: string;
+  round: string;
+  participantId: string;
+  outcome: MatchOutcome;
 }
 
-export async function setStandingPosition(
+// Every recorded result for every match in this tournament modality — the
+// raw material the service layer recomputes standings from on every write.
+// Nothing is stored pre-aggregated; there is exactly one source of truth.
+export async function listResultsForModality(
   db: DbClient,
-  params: {
-    tournamentModalityId: string;
-    participantId: string;
-    position: number | null;
-    points?: number;
-  },
-): Promise<void> {
-  await db
-    .insert(standings)
-    .values({
-      tournamentModalityId: params.tournamentModalityId,
-      participantId: params.participantId,
-      position: params.position,
-      points: params.points ?? 0,
+  tournamentModalityId: string,
+): Promise<RecordedMatchResult[]> {
+  return db
+    .select({
+      matchId: matches.id,
+      round: matches.round,
+      participantId: matchResults.participantId,
+      outcome: matchResults.outcome,
     })
-    .onConflictDoUpdate({
-      target: [standings.tournamentModalityId, standings.participantId],
-      set: {
-        position: params.position,
-        ...(params.points !== undefined ? { points: params.points } : {}),
-        updatedAt: new Date(),
-      },
-    });
+    .from(matchResults)
+    .innerJoin(matches, eq(matches.id, matchResults.matchId))
+    .where(eq(matches.tournamentModalityId, tournamentModalityId));
+}
+
+export interface StandingComputation {
+  participantId: string;
+  position: number | null;
+  points: number;
+  wins: number;
+  draws: number;
+  losses: number;
+}
+
+// Full recomputation, not an incremental patch: deletes every standings row
+// for this modality and reinserts the freshly computed set in one
+// transaction — there is never a stale row left over from a superseded
+// computation.
+export async function replaceStandings(
+  db: DbClient,
+  tournamentModalityId: string,
+  rows: StandingComputation[],
+): Promise<void> {
+  await db.delete(standings).where(eq(standings.tournamentModalityId, tournamentModalityId));
+  if (rows.length === 0) return;
+  await db.insert(standings).values(
+    rows.map((row) => ({
+      tournamentModalityId,
+      participantId: row.participantId,
+      position: row.position,
+      points: row.points,
+      wins: row.wins,
+      draws: row.draws,
+      losses: row.losses,
+    })),
+  );
+}
+
+// Manual placement — fixed_ranking / reorderable_ranking only (no real
+// matches feed these formats). Position-only: these formats don't carry a
+// win/draw/loss tally.
+export async function setManualStandings(
+  db: DbClient,
+  tournamentModalityId: string,
+  entries: { participantId: string; position: number | null }[],
+): Promise<void> {
+  const participantIds = entries.map((entry) => entry.participantId);
+  await db
+    .delete(standings)
+    .where(
+      and(
+        eq(standings.tournamentModalityId, tournamentModalityId),
+        inArray(standings.participantId, participantIds),
+      ),
+    );
+  if (entries.length === 0) return;
+  await db.insert(standings).values(
+    entries.map((entry) => ({
+      tournamentModalityId,
+      participantId: entry.participantId,
+      position: entry.position,
+    })),
+  );
 }
 
 export async function listScenarios(

@@ -14,7 +14,9 @@ export const updateTournamentSchema = z.object({
 export const matchResultInputSchema = z.object({
   participantId: z.string().uuid(),
   score: z.number().int().nullable().default(null),
-  isWinner: z.boolean().default(false),
+  // Explicit — never inferred. Exactly one {win, loss} pair or a {draw, draw}
+  // pair is valid for a match; anything else is rejected (see service.ts).
+  outcome: z.enum(['win', 'draw', 'loss']),
   tiebreakValue: z.number().int().nullable().optional(),
 });
 
@@ -25,7 +27,6 @@ export const recordMatchResultsSchema = z.object({
 export const standingEntrySchema = z.object({
   participantId: z.string().uuid(),
   position: z.number().int().min(1).nullable(),
-  points: z.number().int().min(0).optional(),
 });
 
 export const setStandingsSchema = z.object({

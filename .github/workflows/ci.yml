@@ -48,4 +48,5 @@ jobs:
       - run: npm run typecheck
       - run: npm run db:migrate
       - run: npm test
+      - run: npm run test:integration
       - run: npm run build

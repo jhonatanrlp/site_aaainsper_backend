@@ -4,6 +4,7 @@ import {
   athleteDocuments,
   athleteTeams,
   athletes,
+  modalities,
   modalityDirectors,
   requiredDocuments,
   teamJoinRequests,
@@ -57,6 +58,60 @@ export async function listAthleteTeamIds(db: DbClient, athleteId: string): Promi
     .from(athleteTeams)
     .where(eq(athleteTeams.athleteId, athleteId));
   return rows.map((row) => row.teamId);
+}
+
+export interface AthleteMembership {
+  teamId: string;
+  teamName: string;
+  modalityId: string;
+  modalityName: string;
+}
+
+export async function listAthleteMemberships(
+  db: DbClient,
+  athleteId: string,
+): Promise<AthleteMembership[]> {
+  return db
+    .select({
+      teamId: teams.id,
+      teamName: teams.name,
+      modalityId: modalities.id,
+      modalityName: modalities.name,
+    })
+    .from(athleteTeams)
+    .innerJoin(teams, eq(teams.id, athleteTeams.teamId))
+    .innerJoin(modalities, eq(modalities.id, teams.modalityId))
+    .where(eq(athleteTeams.athleteId, athleteId));
+}
+
+export interface AthletePendingRequest {
+  id: string;
+  teamId: string;
+  teamName: string;
+  modalityId: string;
+  modalityName: string;
+  status: TeamJoinRequestRow['status'];
+  createdAt: Date;
+}
+
+export async function listAthleteJoinRequests(
+  db: DbClient,
+  athleteId: string,
+): Promise<AthletePendingRequest[]> {
+  return db
+    .select({
+      id: teamJoinRequests.id,
+      teamId: teams.id,
+      teamName: teams.name,
+      modalityId: modalities.id,
+      modalityName: modalities.name,
+      status: teamJoinRequests.status,
+      createdAt: teamJoinRequests.createdAt,
+    })
+    .from(teamJoinRequests)
+    .innerJoin(teams, eq(teams.id, teamJoinRequests.teamId))
+    .innerJoin(modalities, eq(modalities.id, teams.modalityId))
+    .where(eq(teamJoinRequests.athleteId, athleteId));
 }
 
 // True if the given director directs at least one modality this athlete has

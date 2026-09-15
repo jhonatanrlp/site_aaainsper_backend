@@ -1,6 +1,7 @@
 CREATE TYPE "public"."athlete_document_status" AS ENUM('pending', 'submitted', 'approved', 'rejected');--> statement-breakpoint
 CREATE TYPE "public"."competition_registration_status" AS ENUM('draft', 'confirmed', 'cancelled');--> statement-breakpoint
 CREATE TYPE "public"."dues_payment_status" AS ENUM('paid', 'pending');--> statement-breakpoint
+CREATE TYPE "public"."match_outcome" AS ENUM('win', 'draw', 'loss');--> statement-breakpoint
 CREATE TYPE "public"."match_slot" AS ENUM('a', 'b');--> statement-breakpoint
 CREATE TYPE "public"."match_status" AS ENUM('scheduled', 'completed');--> statement-breakpoint
 CREATE TYPE "public"."modality_category" AS ENUM('masculino', 'feminino', 'misto');--> statement-breakpoint
@@ -227,7 +228,7 @@ CREATE TABLE "match_results" (
 	"match_id" uuid NOT NULL,
 	"participant_id" uuid NOT NULL,
 	"score" integer,
-	"is_winner" boolean DEFAULT false NOT NULL,
+	"outcome" "match_outcome" NOT NULL,
 	"tiebreak_value" integer,
 	"recorded_by" uuid NOT NULL,
 	"recorded_at" timestamp with time zone DEFAULT now() NOT NULL

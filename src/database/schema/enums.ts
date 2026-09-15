@@ -56,3 +56,7 @@ export const tournamentModalityFormatEnum = pgEnum('tournament_modality_format',
 export const matchStatusEnum = pgEnum('match_status', ['scheduled', 'completed']);
 
 export const matchSlotEnum = pgEnum('match_slot', ['a', 'b']);
+
+// Explicit per-participant outcome — never inferred/guessed. A draw is only
+// ever recorded because the caller explicitly said so for both sides.
+export const matchOutcomeEnum = pgEnum('match_outcome', ['win', 'draw', 'loss']);

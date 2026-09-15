@@ -1,6 +1,7 @@
 import { db } from '../../database/client.js';
 import { recordAudit } from '../audit/repository.js';
-import { ForbiddenError, NotFoundError } from '../../shared/errors.js';
+import { ConflictError, ForbiddenError, NotFoundError } from '../../shared/errors.js';
+import { isUniqueViolation } from '../../shared/db-errors.js';
 import { maskCpf } from '../../shared/cpf.js';
 import type { Page } from '../../shared/pagination.js';
 import {
@@ -38,8 +39,15 @@ export async function completeOwnProfile(
   userId: string,
   input: UpdateOwnProfileInput,
 ): Promise<UserProfileResponse> {
-  const user = await updateOwnProfile(db, userId, input);
-  return toProfileResponse(user);
+  try {
+    const user = await updateOwnProfile(db, userId, input);
+    return toProfileResponse(user);
+  } catch (error) {
+    if (isUniqueViolation(error)) {
+      throw new ConflictError('This CPF is already registered to another account');
+    }
+    throw error;
+  }
 }
 
 export async function listUsers(params: {

@@ -7,6 +7,7 @@ import {
   teamJoinRequests,
   teams,
   trophies,
+  users,
 } from '../../database/schema/index.js';
 import {
   cleanupTestData,
@@ -123,5 +124,32 @@ describe('DB constraints', () => {
     await expect(
       db.insert(teamJoinRequests).values({ athleteId: athlete.id, teamId: team.id }),
     ).resolves.not.toThrow();
+  });
+});
+
+describe('transaction rollback', () => {
+  // Every privileged service function (approveJoinRequest, createReservation,
+  // etc.) uses this exact db.transaction(async (tx) => { ... }) pattern.
+  // This proves the underlying guarantee they all depend on: if anything
+  // inside throws, EVERYTHING written earlier in that same transaction is
+  // rolled back — not just the failing statement, and not left as a
+  // partial/dirty write.
+  it('rolls back an insert that already ran earlier in the same transaction when a later step throws', async () => {
+    const doomedUserId = crypto.randomUUID();
+
+    await expect(
+      db.transaction(async (tx) => {
+        await tx
+          .insert(users)
+          .values({ id: doomedUserId, email: `${doomedUserId}@al.insper.edu.br` });
+        // Simulates a later step in the same transaction failing (e.g. a
+        // constraint violation, or a thrown domain error) after an earlier
+        // write already ran.
+        throw new Error('deliberate failure after a write, to prove rollback');
+      }),
+    ).rejects.toThrow('deliberate failure after a write');
+
+    const [row] = await db.select().from(users).where(eq(users.id, doomedUserId));
+    expect(row).toBeUndefined();
   });
 });
